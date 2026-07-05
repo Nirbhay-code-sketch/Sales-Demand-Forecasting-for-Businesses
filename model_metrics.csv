@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forecast Results — ForecastLedger</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="brand">Fore<span>cast</span>Ledger</div>
+      <div class="tagline">Sales &amp; Demand Forecasting</div>
+    </header>
+
+    <h1 class="page-title">Forecast results</h1>
+    <p class="subtitle">
+      Data source: <strong>{{ source_name }}</strong> · {{ num_rows }} days of history ·
+      {{ horizon }}-day forecast · best model: <strong>{{ best_model_name }}</strong>
+    </p>
+
+    <div class="ledger-strip">
+      <div class="ledger-cell">
+        <div class="label">Forecast total</div>
+        <div class="value copper">{{ "{:,}".format(forecast_total) }}</div>
+      </div>
+      <div class="ledger-cell">
+        <div class="label">Avg. per day</div>
+        <div class="value">{{ "{:,}".format(forecast_avg) }}</div>
+      </div>
+      <div class="ledger-cell">
+        <div class="label">Trend</div>
+        <div class="value">{{ facts.trend_direction|capitalize }}</div>
+      </div>
+      <div class="ledger-cell">
+        <div class="label">Busiest day</div>
+        <div class="value">{{ facts.best_day }}</div>
+      </div>
+    </div>
+
+    <div class="card chart-card">
+      <h2>History &amp; forecast</h2>
+      <p class="hint">Solid line = actual history. Dashed copper line = the {{ horizon }}-day forecast ahead.</p>
+      <img src="data:image/png;base64,{{ charts.forecast }}" alt="Sales history and forecast chart">
+    </div>
+
+    <div class="card">
+      <h2>Business summary</h2>
+      <div class="summary-box">{{ summary_text }}</div>
+    </div>
+
+    <div class="card">
+      <h2>Model accuracy comparison</h2>
+      <p class="hint">All models were tested on the most recent {{ test_size }} days of real (held-out) data — never seen during training.</p>
+      <table class="metrics-table">
+        <thead>
+          <tr><th>Rank</th><th>Model</th><th>MAE</th><th>RMSE</th><th>MAPE</th><th>R²</th></tr>
+        </thead>
+        <tbody>
+          {% for row in metrics %}
+            <tr class="{{ 'best-row' if row.rank == 1 else '' }}">
+              <td>#{{ row['rank'] }}</td>
+              <td>{{ row.model }}{% if row.model == best_model_name %}<span class="tag-inline">used for forecast</span>{% endif %}</td>
+              <td>{{ row.mae }}</td>
+              <td>{{ row.rmse }}</td>
+              <td>{{ row.mape }}%</td>
+              <td>{{ row.r2 }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card chart-card">
+      <h2>Actual vs. predicted (test period)</h2>
+      <img src="data:image/png;base64,{{ charts.actual_vs_predicted }}" alt="Actual vs predicted chart">
+    </div>
+
+    <div class="card chart-card">
+      <h2>Model comparison chart</h2>
+      <img src="data:image/png;base64,{{ charts.model_comparison }}" alt="Model comparison bar chart">
+    </div>
+
+    <div class="card chart-card">
+      <h2>Trend &amp; seasonality breakdown</h2>
+      <p class="hint">Separates the raw sales signal into its long-run trend, recurring weekly pattern, and leftover noise.</p>
+      <img src="data:image/png;base64,{{ charts.decomposition }}" alt="Trend and seasonality decomposition chart">
+    </div>
+
+    <div class="card chart-card">
+      <h2>Day-of-week effect</h2>
+      <img src="data:image/png;base64,{{ charts.weekday_effect }}" alt="Weekday effect chart">
+    </div>
+
+    <div class="actions-row">
+      <a href="/download/{{ run_id }}" class="btn-secondary">Download forecast.csv</a>
+      <a href="/" class="btn-secondary">Run another forecast</a>
+      <a href="/history" class="btn-secondary">View past runs</a>
+    </div>
+
+    <footer class="foot">
+      Best model selected automatically by lowest MAPE on held-out test data.
+    </footer>
+  </div>
+</body>
+</html>

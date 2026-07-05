@@ -1,0 +1,133 @@
+"""
+forecasting.py
+--------------
+Trains and compares forecasting models, then produces a recursive
+multi-step forecast into the future.
+
+Models included (progressively more sophisticated, so results are easy
+to explain to a non-technical audience):
+    1. Naive        -> "tomorrow = today" (the baseline everything must beat)
+    2. Moving Average -> average of the last N days
+    3. Linear Regression -> learns trend + seasonality from time features
+    4. Random Forest -> learns non-linear patterns (promotions, interactions)
+
+All models are evaluated on a held-out *future* period (never on
+randomly shuffled data) because shuffling would leak future
+information into training -- a common time-series mistake.
+"""
+
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+
+from src.preprocessing import get_feature_columns, add_time_features, add_lag_and_rolling_features
+
+
+def time_based_split(df: pd.DataFrame, test_size: int):
+    """Split so the test set is strictly the most recent `test_size` rows.
+    This mimics a real forecasting scenario: train on the past, evaluate
+    on the most recent known period before forecasting into the future.
+    """
+    train = df.iloc[:-test_size].reset_index(drop=True)
+    test = df.iloc[-test_size:].reset_index(drop=True)
+    return train, test
+
+
+def naive_forecast(train: pd.DataFrame, test: pd.DataFrame, target_col: str = "sales"):
+    """Predicts each day's sales as equal to the previous day's actual sales."""
+    last_train_value = train[target_col].iloc[-1]
+    preds = [last_train_value] + list(test[target_col].iloc[:-1])
+    return np.array(preds)
+
+
+def moving_average_forecast(train: pd.DataFrame, test: pd.DataFrame,
+                             target_col: str = "sales", window: int = 7):
+    """Predicts each day as the average of the last `window` known days,
+    rolling forward through the test set.
+    """
+    history = list(train[target_col].iloc[-window:])
+    preds = []
+    for actual in test[target_col]:
+        preds.append(np.mean(history[-window:]))
+        history.append(actual)
+    return np.array(preds)
+
+
+def train_regression_models(train: pd.DataFrame, test: pd.DataFrame, feature_cols, target_col="sales"):
+    """Train Linear Regression and Random Forest on engineered features."""
+    X_train, y_train = train[feature_cols], train[target_col]
+    X_test = test[feature_cols]
+
+    lin_model = LinearRegression()
+    lin_model.fit(X_train, y_train)
+    lin_preds = lin_model.predict(X_test)
+
+    rf_model = RandomForestRegressor(n_estimators=300, max_depth=8, random_state=42, n_jobs=-1)
+    rf_model.fit(X_train, y_train)
+    rf_preds = rf_model.predict(X_test)
+
+    return {
+        "Linear Regression": (lin_model, lin_preds),
+        "Random Forest": (rf_model, rf_preds),
+    }
+
+
+def run_all_models(train: pd.DataFrame, test: pd.DataFrame, feature_cols, target_col="sales"):
+    """Run every model and return {model_name: predictions_array}."""
+    results = {
+        "Naive (yesterday)": naive_forecast(train, test, target_col),
+        "Moving Average (7d)": moving_average_forecast(train, test, target_col, window=7),
+    }
+    reg_results = train_regression_models(train, test, feature_cols, target_col)
+    for name, (_, preds) in reg_results.items():
+        results[name] = preds
+
+    fitted_models = {name: model for name, (model, _) in reg_results.items()}
+    return results, fitted_models
+
+
+def forecast_future(df: pd.DataFrame, model, feature_cols, horizon: int,
+                     target_col: str = "sales", freq: str = "D"):
+    """Recursively forecast `horizon` future periods using a fitted
+    regression model.
+
+    Because lag/rolling features depend on recent sales values (which
+    don't exist yet for future dates), we predict one step at a time
+    and feed each prediction back in as if it were the actual value,
+    so the next step's lag features can be computed.
+    """
+    history = df.copy().reset_index(drop=True)
+    last_date = history["date"].max()
+    future_dates = pd.date_range(last_date + pd.Timedelta(days=1), periods=horizon, freq=freq)
+
+    # Carry forward any extra business columns (e.g. promotion) as 0
+    # by default for future dates, since we don't know them yet.
+    extra_cols = [c for c in history.columns
+                  if c not in ("date", "sales", "was_missing") and c in feature_cols
+                  and not any(c.startswith(p) for p in
+                              ["lag_", "rolling_", "time_index", "month", "day", "quarter",
+                               "week_of_year", "year"])]
+
+    predictions = []
+    working = history[["date", "sales"] + extra_cols].copy()
+
+    for future_date in future_dates:
+        new_row = {"date": future_date, "sales": np.nan}
+        for c in extra_cols:
+            new_row[c] = 0
+        working = pd.concat([working, pd.DataFrame([new_row])], ignore_index=True)
+
+        working_feat = add_time_features(working)
+        working_feat = add_lag_and_rolling_features(working_feat, target_col="sales")
+
+        row = working_feat.iloc[[-1]]
+        X_future = row[feature_cols]
+        pred = float(model.predict(X_future)[0])
+        pred = max(pred, 0)  # sales can't be negative
+
+        predictions.append(pred)
+        working.loc[working.index[-1], "sales"] = pred
+
+    forecast_df = pd.DataFrame({"date": future_dates, "forecast": predictions})
+    return forecast_df

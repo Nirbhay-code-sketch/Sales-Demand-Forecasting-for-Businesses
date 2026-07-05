@@ -1,0 +1,208 @@
+# Sales & Demand Forecasting System
+
+An end-to-end forecasting system that turns raw historical sales data into
+a business-ready plan — trend direction, seasonality, model accuracy, and a
+forward-looking forecast, explained in plain English.
+
+Built for **Future Interns – Machine Learning Task 1 (2026)**.
+
+---
+
+## What it does
+
+1. **Cleans** historical sales data (fills missing calendar dates, interpolates gaps)
+2. **Engineers time-based features**: calendar features (month, day-of-week,
+   quarter, cyclical encodings), a linear trend index, and lag/rolling-window
+   features (yesterday's sales, last week's average, etc.)
+3. **Trains and compares 4 forecasting approaches**:
+   - Naive ("tomorrow = today") — the baseline everything must beat
+   - Moving Average (7-day)
+   - Linear Regression (learns trend + seasonality)
+   - Random Forest (learns non-linear patterns like promotions)
+4. **Evaluates honestly** — always on the most *recent* held-out period
+   (never randomly shuffled data, which would leak the future into training)
+5. **Decomposes trend & seasonality** — a from-scratch, dependency-free
+   decomposition (no `statsmodels` required) showing trend / weekly
+   seasonality / residual noise separately
+6. **Forecasts forward** recursively using the best model, day by day
+7. **Explains results in plain English** — "business is growing +X%",
+   "busiest day is Sunday", "build a Y% buffer into inventory"
+8. **Visualizes everything** — 5 charts covering history+forecast, model
+   accuracy, decomposition, and weekday effects
+9. **Remembers every run** — each forecast (dataset used, model, accuracy,
+   forecast values) is saved to a local SQLite database, viewable on a
+   "Past forecast runs" history page
+
+---
+
+## Two ways to run it
+
+### Option A — Web dashboard (recommended)
+
+```bash
+pip install -r requirements.txt
+python app.py
+```
+
+Open **http://127.0.0.1:5000**. From there:
+- Use the bundled 2-year sample retail dataset, or upload your own CSV
+- Set the forecast horizon (days ahead) and test window (days held back
+  for accuracy evaluation)
+- Get a full dashboard: key metrics strip, forecast chart, business
+  summary, model comparison table, decomposition, weekday effects
+- Download the forecast as CSV
+- Click **"View past forecast runs"** to see every run you've generated,
+  pulled from the local SQLite database
+
+### Option B — Command line
+
+```bash
+python main.py --data data/sales_history.csv --horizon 30 --test-size 60
+```
+
+Prints the model comparison table and business summary to the console, and
+saves everything to `outputs/`:
+- `forecast.csv`, `model_metrics.csv`, `business_summary.txt`
+- `forecast.png`, `actual_vs_predicted.png`, `decomposition.png`,
+  `model_comparison.png`, `weekday_effect.png`
+
+---
+
+## Project structure
+
+```
+sales_forecasting_system/
+├── data/
+│   └── sales_history.csv        # 2 years of synthetic daily retail sales
+│                                  # (trend + weekly/yearly seasonality + promos)
+├── src/
+│   ├── preprocessing.py          # load, clean, time & lag/rolling features
+│   ├── decomposition.py          # dependency-free trend/seasonality split
+│   ├── forecasting.py            # 4 models + recursive future forecasting
+│   ├── evaluation.py             # MAE, RMSE, MAPE, R² + plain-English recap
+│   ├── visualization.py          # all 5 chart types
+│   ├── report.py                 # business summary + CSV export helpers
+│   └── database.py               # SQLite persistence (datasets + forecast runs)
+├── templates/                    # web dashboard HTML
+│   ├── index.html
+│   ├── results.html
+│   └── history.html              # past forecast runs, read from SQLite
+├── static/
+│   └── style.css
+├── outputs/                      # generated charts, CSVs, summary text
+├── data/
+│   ├── sales_history.csv         # sample dataset
+│   └── forecasting.db            # SQLite database (created on first run)
+├── app.py                        # Flask web dashboard entry point (frontend + backend)
+├── main.py                       # CLI entry point
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## Using your own data
+
+Any CSV with a date column and a numeric sales/demand column works:
+
+```csv
+date,sales
+2024-01-01,412
+2024-01-02,389
+...
+```
+
+Extra numeric columns (e.g. a `promotion` flag, `price`, `foot_traffic`)
+are automatically picked up and used as additional model features.
+
+- **CLI**: `python main.py --data your_file.csv --date-col date --target-col sales`
+- **Web app**: upload the CSV and type in your column names on the form
+
+If your data isn't daily (e.g. weekly or monthly), the pipeline still
+works — the trend/lag features adapt to whatever spacing your dates use,
+though very short histories (under ~90 rows) won't leave enough data for
+both training and a meaningful test window.
+
+---
+
+## Database (SQLite)
+
+Every time you generate a forecast through the web app, it's saved to a local
+SQLite file at `data/forecasting.db` — no server setup required, and nothing
+leaves your machine.
+
+**Schema:**
+
+| Table | Purpose |
+|---|---|
+| `datasets` | One row per dataset used (name, source, row count, date range) |
+| `sales_records` | The historical rows belonging to each dataset |
+| `forecast_runs` | One row per forecast you generate — model used, horizon, accuracy (MAE/RMSE/MAPE/R²), trend direction |
+| `forecast_points` | The actual predicted values for each run, one row per forecast day |
+
+View everything through the **"Past forecast runs"** page in the web app
+(`/history`), or query the database directly:
+
+```bash
+sqlite3 data/forecasting.db "SELECT run_id, best_model, mape, created_at FROM forecast_runs ORDER BY created_at DESC;"
+```
+
+This makes it easy to track forecast accuracy over time as new data comes in,
+which is exactly what a real business would want from a forecasting tool.
+
+---
+
+## How the forecast works (in plain terms)
+
+1. **Feature engineering** turns each date into signals a regression model
+   can learn from: is it a weekend? which month? what were sales like
+   yesterday / last week / on average over the last month?
+2. **Four models compete** on a fair test: the most recent N days are
+   hidden during training, then every model predicts those same days and
+   gets scored against what actually happened.
+3. **The most accurate model** (lowest MAPE — mean absolute percentage
+   error) is automatically selected to generate the forward-looking
+   forecast.
+4. **Forecasting forward** is done one day at a time: each day's
+   prediction becomes an input for predicting the next day, so the model
+   can keep using lag features even into future dates it's never seen.
+5. **Trend & seasonality** are shown separately from the forecast itself,
+   so stakeholders understand *why* the forecast looks the way it does —
+   not just what the number is.
+
+---
+
+## Why no `statsmodels` / Prophet / ARIMA?
+
+This project deliberately uses only `pandas`, `numpy`, and `scikit-learn`
+so it:
+- Installs instantly with no compiled dependencies or extra downloads
+- Stays fully explainable — every feature is a column you can inspect,
+  not a black-box statistical model
+- Still captures trend, weekly seasonality, and yearly seasonality
+  effectively, as the sample results show (Linear Regression regularly
+  scores under 6% MAPE on the bundled dataset)
+
+If you want to extend this further, ARIMA/SARIMA (via `statsmodels`) or
+Facebook Prophet are natural next steps once internet access to install
+them is available.
+
+---
+
+## Limitations & possible extensions
+
+- Recursive forecasting means small errors early in the horizon can
+  compound over a long forecast window — accuracy is best in the first
+  1–4 weeks ahead.
+- The bundled Random Forest doesn't extrapolate trend growth beyond what
+  it saw in training as well as Linear Regression does — this is why
+  Linear Regression often wins on this trending dataset. Try both on
+  your own data since the ranking can flip.
+- Could be extended with per-product / per-store forecasting (group by
+  a category column and run the pipeline once per group).
+- Could add confidence intervals around the forecast for a more complete
+  "best case / worst case" business view.
+
+---
+
+*Built as part of the Future Interns Machine Learning internship track.*

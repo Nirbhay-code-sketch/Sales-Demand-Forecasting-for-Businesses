@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Past Runs — ForecastLedger</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="brand">Fore<span>cast</span>Ledger</div>
+      <a href="/" class="tagline history-link">&larr; Back to forecast tool</a>
+    </header>
+
+    <h1 class="page-title">Past forecast runs</h1>
+    <p class="subtitle">
+      Every forecast you've generated is saved to a local SQLite database
+      (<code>data/forecasting.db</code>) so you can track accuracy and
+      revisit earlier runs.
+    </p>
+
+    <div class="card">
+      {% if runs %}
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th>Run ID</th>
+              <th>Dataset</th>
+              <th>Model used</th>
+              <th>Horizon</th>
+              <th>MAPE</th>
+              <th>R²</th>
+              <th>Trend</th>
+              <th>Created (UTC)</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for run in runs %}
+              <tr>
+                <td>{{ run.run_id }}</td>
+                <td>{{ run.dataset_name }}</td>
+                <td>{{ run.best_model }}</td>
+                <td>{{ run.horizon }} days</td>
+                <td>{{ run.mape }}%</td>
+                <td>{{ run.r2 }}</td>
+                <td>{{ run.trend_direction|capitalize if run.trend_direction else '—' }}</td>
+                <td>{{ run.created_at[:19] }}</td>
+                <td><a href="/download/{{ run.run_id }}" class="history-link">CSV</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty-state">No forecast runs saved yet. Generate a forecast to see it logged here.</p>
+      {% endif %}
+    </div>
+
+    <footer class="foot">
+      Runs are stored locally in SQLite — nothing leaves your machine.
+    </footer>
+  </div>
+</body>
+</html>

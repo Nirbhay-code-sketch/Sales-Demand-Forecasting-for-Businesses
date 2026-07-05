@@ -1,0 +1,5 @@
+rank,model,mae,rmse,mape,r2
+1,Linear Regression,51.94,66.25,5.76,0.613
+2,Naive (yesterday),64.62,87.33,7.32,0.328
+3,Moving Average (7d),72.35,90.14,8.12,0.284
+4,Random Forest,77.81,95.93,8.36,0.189

@@ -1,0 +1,12 @@
+BUSINESS SUMMARY — next 30 days
+--------------------------------------------------
+Best model: Linear Regression (avg error 52 units/day, ~5.8% of typical daily sales).
+Business is currently growing (+75.6% over the observed history).
+Busiest day of the week: Sunday. Slowest day: Tuesday.
+Strongest month historically: November. Weakest month: January.
+Forecasted total demand for the next 30 days: 26,794 units (average 893/day, +16.7% vs. recent historical average).
+
+Suggested actions:
+  - Stock up ahead of Sundays and the November peak season.
+  - Consider leaner staffing/inventory around Tuesdays and January.
+  - Build a buffer of about 6% into inventory plans to cover forecast uncertainty.

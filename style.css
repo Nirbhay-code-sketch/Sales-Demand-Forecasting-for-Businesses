@@ -1,0 +1,141 @@
+"""
+preprocessing.py
+-----------------
+Loads raw historical sales data and turns it into a clean, model-ready
+time series with engineered time-based features.
+
+Design notes:
+- Works with any two-column-minimum CSV: a date column and a target
+  (sales/demand) column. Extra columns (e.g. promotion flags) are kept
+  and used as additional features if present.
+- Missing calendar dates are re-indexed in so gaps don't silently skew
+  lag/rolling features.
+- All feature engineering is done with plain pandas/numpy so the whole
+  pipeline runs fully offline with no extra downloads.
+"""
+
+import pandas as pd
+import numpy as np
+
+
+def load_sales_data(path: str, date_col: str = "date", target_col: str = "sales") -> pd.DataFrame:
+    """Load a CSV and standardize the date/target column names."""
+    df = pd.read_csv(path)
+
+    if date_col not in df.columns:
+        raise ValueError(f"Date column '{date_col}' not found. Available columns: {list(df.columns)}")
+    if target_col not in df.columns:
+        raise ValueError(f"Target column '{target_col}' not found. Available columns: {list(df.columns)}")
+
+    df[date_col] = pd.to_datetime(df[date_col])
+    df = df.rename(columns={date_col: "date", target_col: "sales"})
+    df = df.sort_values("date").reset_index(drop=True)
+    return df
+
+
+def fill_missing_dates(df: pd.DataFrame, freq: str = "D") -> pd.DataFrame:
+    """Reindex to a continuous date range and interpolate any gaps.
+
+    Real-world sales data often has missing days (store closed, no data
+    logged, etc). Leaving gaps would corrupt lag/rolling features, so we
+    fill them with linear interpolation and flag which rows were filled.
+    """
+    full_range = pd.date_range(df["date"].min(), df["date"].max(), freq=freq)
+    df = df.set_index("date").reindex(full_range)
+    df.index.name = "date"
+
+    df["was_missing"] = df["sales"].isna().astype(int)
+    df["sales"] = df["sales"].interpolate(method="linear").bfill().ffill()
+
+    # Any other numeric columns (e.g. promotion flags): fill with 0
+    for col in df.columns:
+        if col not in ("sales", "was_missing") and df[col].isna().any():
+            df[col] = df[col].fillna(0)
+
+    return df.reset_index()
+
+
+def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add calendar-based features that let a regression model learn
+    trend and seasonality without needing a specialized time-series
+    library.
+    """
+    df = df.copy()
+    df["year"] = df["date"].dt.year
+    df["month"] = df["date"].dt.month
+    df["day"] = df["date"].dt.day
+    df["day_of_week"] = df["date"].dt.dayofweek       # 0=Mon ... 6=Sun
+    df["day_of_year"] = df["date"].dt.dayofyear
+    df["week_of_year"] = df["date"].dt.isocalendar().week.astype(int)
+    df["quarter"] = df["date"].dt.quarter
+    df["is_weekend"] = (df["day_of_week"] >= 5).astype(int)
+    df["is_month_start"] = df["date"].dt.is_month_start.astype(int)
+    df["is_month_end"] = df["date"].dt.is_month_end.astype(int)
+
+    # Linear time index -> lets the model learn the overall trend
+    df["time_index"] = np.arange(len(df))
+
+    # Cyclical encoding so the model knows Dec 31 is "close" to Jan 1,
+    # and Sunday is "close" to Monday (raw integers would imply a cliff).
+    df["month_sin"] = np.sin(2 * np.pi * df["month"] / 12)
+    df["month_cos"] = np.cos(2 * np.pi * df["month"] / 12)
+    df["dow_sin"] = np.sin(2 * np.pi * df["day_of_week"] / 7)
+    df["dow_cos"] = np.cos(2 * np.pi * df["day_of_week"] / 7)
+
+    return df
+
+
+def add_lag_and_rolling_features(df: pd.DataFrame, target_col: str = "sales",
+                                  lags=(1, 7, 14, 30), rolling_windows=(7, 30)) -> pd.DataFrame:
+    """Add lag features (yesterday's / last week's sales, etc.) and
+    rolling mean/std features (recent trend level and volatility).
+
+    NOTE: these features use PAST values only, so they are safe to use
+    for forecasting without leaking future information.
+    """
+    df = df.copy()
+    for lag in lags:
+        df[f"lag_{lag}"] = df[target_col].shift(lag)
+
+    for window in rolling_windows:
+        df[f"rolling_mean_{window}"] = df[target_col].shift(1).rolling(window).mean()
+        df[f"rolling_std_{window}"] = df[target_col].shift(1).rolling(window).std()
+
+    return df
+
+
+def build_feature_frame(path: str, date_col: str = "date", target_col: str = "sales",
+                         freq: str = "D") -> pd.DataFrame:
+    """Full pipeline: load -> fill gaps -> time features -> lag/rolling features.
+
+    Returns a DataFrame ready for train/test split. Rows with NaN lag
+    features (the first `max(lags)` rows) are dropped since a model
+    can't use them.
+    """
+    df = load_sales_data(path, date_col, target_col)
+    df = fill_missing_dates(df, freq=freq)
+    df = add_time_features(df)
+    df = add_lag_and_rolling_features(df, target_col="sales")
+    df = df.dropna().reset_index(drop=True)
+    return df
+
+
+FEATURE_COLUMNS = [
+    "time_index", "month", "day", "day_of_week", "day_of_year", "week_of_year",
+    "quarter", "is_weekend", "is_month_start", "is_month_end",
+    "month_sin", "month_cos", "dow_sin", "dow_cos",
+    "lag_1", "lag_7", "lag_14", "lag_30",
+    "rolling_mean_7", "rolling_std_7", "rolling_mean_30", "rolling_std_30",
+]
+
+
+def get_feature_columns(df: pd.DataFrame):
+    """Return the feature columns that are actually present in df,
+    plus any extra numeric business columns (e.g. 'promotion') found
+    in the source data.
+    """
+    cols = [c for c in FEATURE_COLUMNS if c in df.columns]
+    extra = [c for c in df.columns
+             if c not in cols and c not in ("date", "sales", "was_missing")
+             and pd.api.types.is_numeric_dtype(df[c])]
+    return cols + extra

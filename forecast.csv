@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sales &amp; Demand Forecasting</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="brand">Fore<span>cast</span>Ledger</div>
+      <a href="/history" class="tagline history-link">View past forecast runs &rarr;</a>
+    </header>
+
+    <h1 class="page-title">Turn sales history into a plan you can act on</h1>
+    <p class="subtitle">
+      Upload historical sales data (or try the sample retailer dataset), pick how
+      far ahead to forecast, and get a business-ready read on trend, seasonality,
+      model accuracy, and what to stock up on next.
+    </p>
+
+    {% if error %}
+      <div class="error-banner">{{ error }}</div>
+    {% endif %}
+
+    <form action="/forecast" method="post" enctype="multipart/form-data">
+
+      <div class="card">
+        <h2>1. Historical sales data</h2>
+        <p class="hint">Use the bundled 2-year sample dataset, or upload your own CSV with a date column and a sales/demand column.</p>
+
+        <div class="option-row">
+          <label class="radio-pill">
+            <input type="radio" name="data_choice" value="sample" checked onchange="toggleFields()"> Use sample data (2 yrs, daily retail sales)
+          </label>
+          <label class="radio-pill">
+            <input type="radio" name="data_choice" value="upload" onchange="toggleFields()"> Upload my CSV
+          </label>
+        </div>
+
+        <div id="data-upload" class="field-block">
+          <input type="file" name="data_file" accept=".csv">
+          <div class="two-col" style="margin-top: 14px;">
+            <div>
+              <label class="field-label">Date column name</label>
+              <input type="text" name="date_col" value="date">
+            </div>
+            <div>
+              <label class="field-label">Sales/demand column name</label>
+              <input type="text" name="target_col" value="sales">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>2. Forecast settings</h2>
+        <p class="hint">How far ahead to predict, and how much recent history to hold back for accuracy testing.</p>
+        <div class="two-col">
+          <div>
+            <label class="field-label">Forecast horizon (days ahead)</label>
+            <input type="number" name="horizon" value="30" min="7" max="180">
+          </div>
+          <div>
+            <label class="field-label">Test window (days held out for evaluation)</label>
+            <input type="number" name="test_size" value="60" min="14" max="365">
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="btn-primary">Generate forecast &rarr;</button>
+    </form>
+
+    <footer class="foot">
+      Built for Future Interns — Machine Learning Task 1 (2026) · Linear Regression + Random Forest vs. Naive/Moving-Average baselines, fully offline.
+    </footer>
+  </div>
+
+  <script>
+    function toggleFields() {
+      const choice = document.querySelector('input[name="data_choice"]:checked').value;
+      document.getElementById('data-upload').classList.toggle('visible', choice === 'upload');
+    }
+    toggleFields();
+  </script>
+</body>
+</html>
